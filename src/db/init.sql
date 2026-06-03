@@ -116,8 +116,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
     cog_deg         NUMERIC(6,2),
     fix_valid       BOOLEAN         NOT NULL DEFAULT FALSE,
  
-    -- Hız
-    speed_kmh       NUMERIC(7,2)    NOT NULL,
+    -- Hız (opsiyonel — sensör göndermeyebilir)
+    speed_kmh       NUMERIC(7,2),
     speed_knots     NUMERIC(7,2),
  
     -- Yük
@@ -186,7 +186,30 @@ CREATE INDEX IF NOT EXISTS idx_ds_vehicle_date ON daily_summaries(vehicle_id, su
 CREATE INDEX IF NOT EXISTS idx_ds_date         ON daily_summaries(summary_date DESC);
 
 -- ============================================================
---  9. FONKSİYONLAR
+--  9. STOP_LOCATIONS — Önceden Tanımlı Durak Lokasyonları
+-- ============================================================
+CREATE TABLE IF NOT EXISTS stop_locations (
+    id          SERIAL          PRIMARY KEY,
+    vehicle_id  INT             NOT NULL REFERENCES vehicles(id) ON DELETE RESTRICT,
+    name        VARCHAR(255)    NOT NULL,
+    lat         NUMERIC(10,7)   NOT NULL,
+    lon         NUMERIC(10,7)   NOT NULL,
+    radius_m    INT             NOT NULL DEFAULT 5,
+    is_active   BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_stop_locations_vehicle ON stop_locations(vehicle_id);
+
+COMMENT ON TABLE  stop_locations          IS 'Araç için önceden tanımlı çöp toplama noktaları — geofencing referansı';
+COMMENT ON COLUMN stop_locations.radius_m IS 'Kamyon bu yarıçap (metre) içine girince varış tetiklenir';
+
+-- waypoints tablosuna geofencing bağlantısı
+ALTER TABLE waypoints ADD COLUMN IF NOT EXISTS
+    stop_location_id INT REFERENCES stop_locations(id);
+
+-- ============================================================
+--  10. FONKSİYONLAR
 -- ============================================================
 CREATE OR REPLACE FUNCTION get_active_driver(p_vehicle_id INT)
 RETURNS INT AS $$

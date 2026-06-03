@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const vehicleController = require('../controllers/vehicleController');
+const stopLocationController = require('../controllers/stopLocationController');
 const authMiddleware = require('../middleware/authMiddleware');
 const verifyVehicleOwnership = require('../middleware/vehicleOwnership');
 
@@ -19,6 +20,7 @@ router.get('/:id/summary', vehicleController.getVehicleSummary);
 router.get('/:id/telemetry', vehicleController.getVehicleTelemetry);
 router.get('/:id/sensors', vehicleController.getVehicleSensors);
 router.get('/:id/waypoints', vehicleController.getVehicleWaypoints);
+router.get('/:id/stop-locations', stopLocationController.getStopLocations);
 router.post('/:id/waypoints', vehicleController.createWaypoint);
 router.put('/:id/waypoints/:waypointId', vehicleController.updateWaypoint);
 router.delete('/:id/waypoints/:waypointId', vehicleController.deleteWaypoint);

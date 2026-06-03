@@ -11,6 +11,7 @@ const driverRoutes = require('./routes/drivers');
 const sensorRoutes = require('./routes/sensors');
 const assignmentRoutes = require('./routes/assignments');
 const userRoutes = require('./routes/users');
+const stopLocationRoutes = require('./routes/stopLocations');
 const { scheduleDailySummary } = require('./cron/dailySummary');
 
 const app = express();
@@ -27,6 +28,7 @@ app.use('/api/drivers', driverRoutes);
 app.use('/api/sensors', sensorRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/stop-locations', stopLocationRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Sunucu çalışıyor! 🚀' });
