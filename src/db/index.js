@@ -3,13 +3,17 @@ require('dotenv').config();
 
 // PG_URL: DigitalOcean'da çakışma yaratmayan özel değişken adı.
 // DATABASE_URL: DO App Platform tarafından otomatik inject edildiği için çakışıyor.
-const connectionString = process.env.PG_URL || process.env.DATABASE_URL;
+const rawConn = process.env.PG_URL || process.env.DATABASE_URL;
 
-// localhost dışındaki bağlantılar (DigitalOcean vb.) için SSL doğrulamasını devre dışı bırak.
-// sslmode=require connection string'de kalır ama sertifika zinciri kontrolü atlanır.
-const isRemote = connectionString &&
-  !connectionString.includes('localhost') &&
-  !connectionString.includes('127.0.0.1');
+const isRemote = rawConn &&
+  !rawConn.includes('localhost') &&
+  !rawConn.includes('127.0.0.1');
+
+// pg-connection-string v3'te sslmode=require → verify-full olarak yorumlanır ve
+// self-signed sertifika hatası verir. sslmode'u string'den çıkarıp SSL'yi açıkça set ediyoruz.
+const connectionString = rawConn
+  ?.replace(/\?sslmode=[^&]*&/, '?')   // ?sslmode=x&other=y → ?other=y
+  ?.replace(/[?&]sslmode=[^&]*/g, ''); // ?sslmode=x veya &sslmode=x → kaldır
 
 const pool = new Pool({
   connectionString,
