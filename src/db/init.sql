@@ -7,13 +7,18 @@ CREATE TABLE IF NOT EXISTS users (
     email           VARCHAR(255)    NOT NULL UNIQUE,
     password_hash   TEXT            NOT NULL,
     full_name       VARCHAR(150),
+    role            VARCHAR(20)     NOT NULL DEFAULT 'customer',
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     last_login      TIMESTAMPTZ
 );
  
+ALTER TABLE users ADD COLUMN IF NOT EXISTS
+    role VARCHAR(20) NOT NULL DEFAULT 'customer';
+
 COMMENT ON TABLE  users               IS 'Sisteme şifresiyle giriş yapan izleyiciler/yöneticiler';
 COMMENT ON COLUMN users.password_hash IS 'Düz metin asla saklanmaz — bcrypt hash (pgcrypto)';
+COMMENT ON COLUMN users.role          IS '''admin'' tüm araçları görür; ''customer'' yalnızca kendine ait araçları görür';
 COMMENT ON COLUMN users.is_active     IS 'FALSE yapılırsa kullanıcı giriş yapamaz, veriler silinmez';
  
  
@@ -47,15 +52,20 @@ COMMENT ON COLUMN vehicles.capacity_kg IS 'Aracın maksimum yük taşıma kapasi
 -- ============================================================
 CREATE TABLE IF NOT EXISTS drivers (
     id              SERIAL          PRIMARY KEY,
+    user_id         INT             NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     full_name       VARCHAR(150)    NOT NULL,
-    license_no      VARCHAR(40)     UNIQUE,
+    license_no      VARCHAR(40),
     phone           VARCHAR(30),
     birth_date      DATE,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE drivers ADD COLUMN IF NOT EXISTS
+    user_id INT REFERENCES users(id) ON DELETE RESTRICT;
  
 COMMENT ON TABLE  drivers          IS 'Şoförler — sisteme giriş yapmaz, sadece bilgi kaydı';
+COMMENT ON COLUMN drivers.user_id  IS 'Bu şoförü oluşturan kullanıcı — yalnızca o kullanıcı görebilir';
 COMMENT ON COLUMN drivers.is_active IS 'FALSE yapılırsa şoför artık aktif değil ama geçmiş kayıtlar korunur';
  
  

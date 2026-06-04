@@ -2,8 +2,33 @@ const pool = require('../db');
 
 exports.getVehicles = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const result = await pool.query('SELECT * FROM vehicles WHERE user_id = $1 AND is_active = TRUE', [userId]);
+    let result;
+    if (req.user.role === 'admin') {
+      const targetUserId = req.query.user_id ? parseInt(req.query.user_id) : null;
+      if (targetUserId) {
+        result = await pool.query(
+          `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name
+           FROM vehicles v
+           JOIN users u ON u.id = v.user_id
+           WHERE v.is_active = TRUE AND v.user_id = $1
+           ORDER BY v.plate`,
+          [targetUserId]
+        );
+      } else {
+        result = await pool.query(
+          `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name
+           FROM vehicles v
+           JOIN users u ON u.id = v.user_id
+           WHERE v.is_active = TRUE
+           ORDER BY u.username, v.plate`
+        );
+      }
+    } else {
+      result = await pool.query(
+        'SELECT * FROM vehicles WHERE user_id = $1 AND is_active = TRUE ORDER BY plate',
+        [req.user.id]
+      );
+    }
     res.json(result.rows);
   } catch (error) {
     console.error('getVehicles Error:', error);

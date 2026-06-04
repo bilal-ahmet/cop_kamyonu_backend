@@ -24,7 +24,7 @@ exports.login = async (req, res) => {
 
         // Token oluşturma
         const token = jwt.sign(
-            { id: user.id, username: user.username },
+            { id: user.id, username: user.username, role: user.role },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -35,7 +35,7 @@ exports.login = async (req, res) => {
         res.json({
             message: 'Giriş başarılı',
             token,
-            user: { id: user.id, username: user.username, full_name: user.full_name }
+            user: { id: user.id, username: user.username, full_name: user.full_name, role: user.role }
         });
     } catch (error) {
         console.error('[Auth Error]', error);

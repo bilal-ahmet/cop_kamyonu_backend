@@ -4,7 +4,7 @@ const bcrypt = require('bcrypt');
 const getMe = async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, username, email, full_name, is_active, created_at, last_login FROM users WHERE id = $1',
+            'SELECT id, username, email, full_name, role, is_active, created_at, last_login FROM users WHERE id = $1',
             [req.user.id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
@@ -49,9 +49,21 @@ const updateMe = async (req, res) => {
 
 const getUsers = async (req, res) => {
     try {
-        const result = await pool.query(
-            'SELECT id, username, email, full_name, is_active, created_at, last_login FROM users ORDER BY created_at DESC'
-        );
+        const search = req.query.search?.trim();
+        let result;
+        if (search) {
+            result = await pool.query(
+                `SELECT id, username, email, full_name, role, is_active, created_at, last_login
+                 FROM users WHERE is_active = TRUE
+                 AND (username ILIKE $1 OR full_name ILIKE $1)
+                 ORDER BY username`,
+                [`%${search}%`]
+            );
+        } else {
+            result = await pool.query(
+                'SELECT id, username, email, full_name, role, is_active, created_at, last_login FROM users WHERE is_active = TRUE ORDER BY username'
+            );
+        }
         res.json(result.rows);
     } catch (err) {
         console.error('getUsers hatası:', err);

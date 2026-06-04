@@ -2,6 +2,8 @@ const pool = require('../db');
 
 const sensorOwnership = async (req, res, next) => {
     try {
+        if (req.user.role === 'admin') return next();
+
         const sensorId = parseInt(req.params.id);
         const userId = req.user.id;
 

@@ -2,6 +2,9 @@ const pool = require('../db');
 
 const verifyVehicleOwnership = async (req, res, next) => {
   try {
+    // Admin tüm araçlara erişebilir
+    if (req.user.role === 'admin') return next();
+
     const userId = req.user.id;
     const vehicleId = parseInt(req.params.id);
 
@@ -9,8 +12,7 @@ const verifyVehicleOwnership = async (req, res, next) => {
     if (checkVehicle.rowCount === 0) {
       return res.status(403).json({ error: 'Bu aracı görüntüleme/işlem yapma yetkiniz yok' });
     }
-    
-    // Doğrulama başarılıysa sonraki adıma geç
+
     next();
   } catch (error) {
     console.error('verifyVehicleOwnership Error:', error);
