@@ -18,7 +18,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf, encoding) => {
+    if (req.url.includes('/api/telemetry')) {
+      console.log('[TELEMETRY RAW]', buf.toString(encoding || 'utf8').substring(0, 500));
+    }
+  }
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/telemetry', telemetryRoutes);
