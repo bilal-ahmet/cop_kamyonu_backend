@@ -130,8 +130,8 @@ CREATE TABLE IF NOT EXISTS telemetry (
     speed_kmh       NUMERIC(7,2),
     speed_knots     NUMERIC(7,2),
  
-    -- Yük
-    load_kg         NUMERIC(10,2)   NOT NULL DEFAULT 0,
+    -- Yük (opsiyonel — sensör göndermeyebilir)
+    load_kg         NUMERIC(10,2),
  
     -- Zaman
     recorded_at     TIMESTAMPTZ     NOT NULL,
@@ -143,6 +143,9 @@ CREATE INDEX IF NOT EXISTS idx_tel_sensor_id    ON telemetry(sensor_id);
 CREATE INDEX IF NOT EXISTS idx_tel_recorded_at  ON telemetry(recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tel_fix_valid    ON telemetry(fix_valid) WHERE fix_valid = TRUE;
  
+ALTER TABLE telemetry ALTER COLUMN load_kg DROP NOT NULL;
+ALTER TABLE telemetry ALTER COLUMN load_kg DROP DEFAULT;
+
 COMMENT ON TABLE  telemetry             IS 'Sensörden gelen ham anlık veriler';
  
  

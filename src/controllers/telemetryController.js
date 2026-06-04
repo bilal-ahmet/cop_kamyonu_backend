@@ -69,47 +69,47 @@ async function checkGeofence(vehicleId, lat, lon, recordedAt) {
 
 exports.receiveTelemetry = async (req, res) => {
     try {
-        const {
-            serial_number, lat, lon, speed_kmh, speed_knots, cog_deg,
-            load_kg, fix_valid, year, month, day, hour, minute, second
-        } = req.body;
+        // Yeni sensör JSON formatı: { "Device Id", timestamp, location: { Lat, Lon }, Sensors: { Weight, ... } }
+        const deviceId = req.body['Device Id'];
+        const { timestamp } = req.body;
+        const lat = req.body.location?.Lat;
+        const lon = req.body.location?.Lon;
+        const load_kg = req.body.Sensors?.Weight ?? null;
 
-        // 0. Eksik Alan Kontrolü
-        if (!serial_number || lat === undefined || lon === undefined ||
-            load_kg === undefined ||
-            !year || !month || !day || hour === undefined || minute === undefined || second === undefined) {
-            return res.status(400).json({ error: 'Zorunlu alanlar eksik' });
+        // 0. Zorunlu alan kontrolü
+        if (!deviceId || !timestamp || lat === undefined || lon === undefined) {
+            return res.status(400).json({
+                error: 'Zorunlu alanlar eksik: Device Id, timestamp, location.Lat, location.Lon'
+            });
         }
 
-        // 1. Sensör Doğrulama (In-Memory Cache üzerinden)
-        const sensorData = sensorCache.getVehicleIdBySensorSN(serial_number);
+        // 1. Sensör doğrulama (in-memory cache üzerinden)
+        const sensorData = sensorCache.getVehicleIdBySensorSN(deviceId);
         if (!sensorData) {
             return res.status(401).json({ error: 'Yetkisiz Sensör: Aktif bir kayıt bulunamadı.' });
         }
-        
+
         const vehicleId = sensorData.vehicle_id;
         const sensorId = sensorData.sensor_id;
 
-        // 2. Veri Doğrulama (Basic validasyonlar)
-        if (lat < -90 || lat > 90 || lon < -180 || lon > 180 || speed_kmh < 0 || load_kg < 0) {
-            return res.status(400).json({ error: 'Geçersiz veri aralığı' });
+        // 2. Koordinat doğrulama
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+            return res.status(400).json({ error: 'Geçersiz koordinat aralığı' });
+        }
+        if (load_kg !== null && load_kg < 0) {
+            return res.status(400).json({ error: 'load_kg negatif olamaz' });
         }
 
-        // 3. Zaman formatlama (JS Date API'si üzerinden TIMESTAMPTZ)
-        // Türkiye saatini açıkça belirterek UTC+3 olarak kaydet
-        const recordDate = new Date(`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}:${String(second).padStart(2,'0')}+03:00`);
-        
-        // 4. Veritabanına Yazma
-        const insertQuery = `
-            INSERT INTO telemetry 
-            (sensor_id, vehicle_id, lat, lon, cog_deg, fix_valid, speed_kmh, speed_knots, load_kg, recorded_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        `;
-        const values = [
-            sensorId, vehicleId, lat, lon, cog_deg, fix_valid, speed_kmh, speed_knots, load_kg, recordDate
-        ];
+        // 3. Unix timestamp (saniye) → Date
+        const recordDate = new Date(timestamp * 1000);
 
-        await pool.query(insertQuery, values);
+        // 4. Veritabanına yazma
+        await pool.query(
+            `INSERT INTO telemetry
+             (sensor_id, vehicle_id, lat, lon, fix_valid, load_kg, recorded_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [sensorId, vehicleId, lat, lon, false, load_kg, recordDate]
+        );
 
         // Geofencing — telemetri yanıtını bloklamaz, arka planda çalışır
         checkGeofence(vehicleId, lat, lon, recordDate);
