@@ -5,8 +5,14 @@ const calculateDailySummary = async () => {
     console.log('[Cron] Günlük istatistik hesaplama başlatıldı...');
     try {
         const query = `
-            INSERT INTO daily_summaries 
-                (vehicle_id, driver_id, summary_date, avg_speed_kmh, max_speed_kmh, waypoint_count, total_load_kg, telemetry_count)
+            INSERT INTO daily_summaries (
+                vehicle_id, driver_id, summary_date,
+                avg_speed_kmh, max_speed_kmh,
+                waypoint_count, total_load_kg, telemetry_count,
+                avg_temperature_c, min_temperature_c, max_temperature_c,
+                avg_humidity_pct, avg_pressure_hpa,
+                motion_count, avg_battery_mv
+            )
             SELECT
                 vehicle_id,
                 get_active_driver(vehicle_id),
@@ -15,12 +21,31 @@ const calculateDailySummary = async () => {
                 COALESCE(MAX(speed_kmh), 0),
                 (SELECT COUNT(*) FROM waypoints WHERE vehicle_id = t.vehicle_id AND arrived_at::date = CURRENT_DATE - 1),
                 (SELECT COALESCE(SUM(load_received_kg), 0) FROM waypoints WHERE vehicle_id = t.vehicle_id AND arrived_at::date = CURRENT_DATE - 1),
-                COUNT(*)
+                COUNT(*),
+                AVG(temperature_c),
+                MIN(temperature_c),
+                MAX(temperature_c),
+                AVG(humidity_pct),
+                AVG(pressure_hpa),
+                COALESCE(SUM(CASE WHEN motion = TRUE THEN 1 ELSE 0 END), 0),
+                AVG(battery_mv)::INT
             FROM telemetry t
             WHERE recorded_at::date = CURRENT_DATE - 1
               AND fix_valid = TRUE
             GROUP BY vehicle_id
-            ON CONFLICT (vehicle_id, summary_date) DO NOTHING;
+            ON CONFLICT (vehicle_id, summary_date) DO UPDATE SET
+                avg_speed_kmh     = EXCLUDED.avg_speed_kmh,
+                max_speed_kmh     = EXCLUDED.max_speed_kmh,
+                waypoint_count    = EXCLUDED.waypoint_count,
+                total_load_kg     = EXCLUDED.total_load_kg,
+                telemetry_count   = EXCLUDED.telemetry_count,
+                avg_temperature_c = EXCLUDED.avg_temperature_c,
+                min_temperature_c = EXCLUDED.min_temperature_c,
+                max_temperature_c = EXCLUDED.max_temperature_c,
+                avg_humidity_pct  = EXCLUDED.avg_humidity_pct,
+                avg_pressure_hpa  = EXCLUDED.avg_pressure_hpa,
+                motion_count      = EXCLUDED.motion_count,
+                avg_battery_mv    = EXCLUDED.avg_battery_mv;
         `;
         
         const result = await pool.query(query);

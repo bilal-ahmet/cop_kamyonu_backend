@@ -132,7 +132,14 @@ CREATE TABLE IF NOT EXISTS telemetry (
  
     -- Yük (opsiyonel — sensör göndermeyebilir)
     load_kg         NUMERIC(10,2),
- 
+
+    -- Çevre sensörleri (opsiyonel)
+    temperature_c   NUMERIC(6,2),
+    humidity_pct    NUMERIC(5,2),
+    pressure_hpa    NUMERIC(7,2),
+    motion          BOOLEAN,
+    battery_mv      INT,
+
     -- Zaman
     recorded_at     TIMESTAMPTZ     NOT NULL,
     received_at     TIMESTAMPTZ     NOT NULL DEFAULT NOW()
@@ -188,10 +195,19 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
     waypoint_count      INT             NOT NULL DEFAULT 0,
     total_load_kg       NUMERIC(12,2)   NOT NULL DEFAULT 0,
     avg_load_kg         NUMERIC(10,2),
- 
+
     telemetry_count     INT             NOT NULL DEFAULT 0,
+
+    avg_temperature_c   NUMERIC(6,2),
+    min_temperature_c   NUMERIC(6,2),
+    max_temperature_c   NUMERIC(6,2),
+    avg_humidity_pct    NUMERIC(5,2),
+    avg_pressure_hpa    NUMERIC(7,2),
+    motion_count        INT             NOT NULL DEFAULT 0,
+    avg_battery_mv      INT,
+
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
- 
+
     UNIQUE (vehicle_id, summary_date)
 );
  
@@ -239,3 +255,22 @@ BEGIN
     RETURN v_driver_id;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================================================
+--  11. MIGRATIONS — Mevcut Veritabanı Güncellemeleri
+-- ============================================================
+
+-- v2: Çevre sensörü alanları
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS temperature_c  NUMERIC(6,2);
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS humidity_pct   NUMERIC(5,2);
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS pressure_hpa   NUMERIC(7,2);
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS motion         BOOLEAN;
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS battery_mv     INT;
+
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_temperature_c  NUMERIC(6,2);
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS min_temperature_c  NUMERIC(6,2);
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS max_temperature_c  NUMERIC(6,2);
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_humidity_pct   NUMERIC(5,2);
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_pressure_hpa   NUMERIC(7,2);
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS motion_count       INT NOT NULL DEFAULT 0;
+ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_battery_mv     INT;

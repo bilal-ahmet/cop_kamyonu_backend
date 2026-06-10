@@ -74,7 +74,13 @@ exports.receiveTelemetry = async (req, res) => {
         const { timestamp } = req.body;
         const lat = req.body.location?.Lat;
         const lon = req.body.location?.Lon;
-        const load_kg = req.body.Sensors?.Weight ?? null;
+        const sensors    = req.body.Sensors ?? {};
+        const load_kg       = sensors.Weight        ?? null;
+        const temperature_c = sensors.Temperature   ?? null;
+        const humidity_pct  = sensors.Humidity      ?? null;
+        const pressure_hpa  = sensors.Pressure      ?? null;
+        const motion        = sensors.Motion != null ? Boolean(sensors.Motion) : null;
+        const battery_mv    = sensors['Battery Voltage'] ?? null;
 
         // 0. Zorunlu alan kontrolü
         if (!deviceId || !timestamp || lat === undefined || lon === undefined) {
@@ -106,9 +112,11 @@ exports.receiveTelemetry = async (req, res) => {
         // 4. Veritabanına yazma
         await pool.query(
             `INSERT INTO telemetry
-             (sensor_id, vehicle_id, lat, lon, fix_valid, load_kg, recorded_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [sensorId, vehicleId, lat, lon, false, load_kg, recordDate]
+             (sensor_id, vehicle_id, lat, lon, fix_valid, load_kg,
+              temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recorded_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [sensorId, vehicleId, lat, lon, false, load_kg,
+             temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recordDate]
         );
 
         // Geofencing — telemetri yanıtını bloklamaz, arka planda çalışır
