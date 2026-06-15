@@ -1,5 +1,6 @@
 const pool = require('../db');
 const sensorCache = require('../cache/sensorCache');
+const { calculateDailySummary } = require('../cron/dailySummary');
 
 /** Haversine formülü — iki GPS noktası arasındaki mesafeyi metre cinsinden hesaplar. */
 function haversineMeters(lat1, lon1, lat2, lon2) {
@@ -117,6 +118,12 @@ exports.receiveTelemetry = async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
             [sensorId, vehicleId, lat, lon, true, load_kg,
              temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recordDate]
+        );
+
+        // Günlük özeti anlık güncelle — yanıtı bloklamaz
+        const dateStr = recordDate.toISOString().split('T')[0];
+        calculateDailySummary(dateStr).catch((err) =>
+            console.error('[Telemetry] Günlük özet güncellenirken hata:', err)
         );
 
         // Geofencing — telemetri yanıtını bloklamaz, arka planda çalışır
