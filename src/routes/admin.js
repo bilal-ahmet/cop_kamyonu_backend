@@ -7,5 +7,6 @@ const authMiddleware = require('../middleware/authMiddleware');
 router.use(authMiddleware);
 
 router.post('/refresh-cache', adminController.refreshCache);
+router.post('/run-summary', adminController.runDailySummary);
 
 module.exports = router;
