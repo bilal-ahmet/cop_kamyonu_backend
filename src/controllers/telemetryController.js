@@ -115,7 +115,7 @@ exports.receiveTelemetry = async (req, res) => {
              (sensor_id, vehicle_id, lat, lon, fix_valid, load_kg,
               temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recorded_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-            [sensorId, vehicleId, lat, lon, false, load_kg,
+            [sensorId, vehicleId, lat, lon, true, load_kg,
              temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recordDate]
         );
 
