@@ -112,15 +112,40 @@ const updateStopLocation = async (req, res) => {
     }
 };
 
+/** Lokasyonu devre dışı bırakır (POST /stop-locations/:id/deactivate) — kayıt durur. */
 const deactivateStopLocation = async (req, res) => {
     try {
-        await pool.query(
-            'UPDATE stop_locations SET is_active = FALSE WHERE id = $1',
+        const result = await pool.query(
+            'UPDATE stop_locations SET is_active = FALSE WHERE id = $1 RETURNING *',
             [req.params.id]
         );
-        res.json({ message: 'Durak lokasyonu devre dışı bırakıldı' });
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Durak lokasyonu bulunamadı' });
+        res.json(result.rows[0]);
     } catch (err) {
-        console.error('deactivateStopLocation hatası:', err);
+        console.error('deactivateStopLocation hatası:', err.code, err.message);
+        res.status(500).json({ error: 'Sunucu hatası' });
+    }
+};
+
+/**
+ * Lokasyonu kalıcı olarak siler (DELETE /stop-locations/:id).
+ * Bağlı waypoint'ler silinmez; FK ON DELETE SET NULL sayesinde bağları kopar,
+ * ziyaret geçmişi (location_name, saatler, yük) olduğu gibi kalır.
+ */
+const deleteStopLocation = async (req, res) => {
+    try {
+        const linked = await pool.query(
+            'SELECT COUNT(*)::int AS n FROM waypoints WHERE stop_location_id = $1',
+            [req.params.id]
+        );
+        const result = await pool.query(
+            'DELETE FROM stop_locations WHERE id = $1 RETURNING id',
+            [req.params.id]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Durak lokasyonu bulunamadı' });
+        res.json({ message: 'Durak lokasyonu silindi', unlinked_waypoints: linked.rows[0].n });
+    } catch (err) {
+        console.error('deleteStopLocation hatası:', err.code, err.message);
         res.status(500).json({ error: 'Sunucu hatası' });
     }
 };
@@ -131,4 +156,5 @@ module.exports = {
     createStopLocation,
     updateStopLocation,
     deactivateStopLocation,
+    deleteStopLocation,
 };

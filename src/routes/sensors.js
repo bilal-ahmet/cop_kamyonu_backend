@@ -11,6 +11,7 @@ router.post('/', sensorController.createSensor);
 router.use('/:id', sensorOwnership);
 router.get('/:id', sensorController.getSensor);
 router.put('/:id', sensorController.updateSensor);
-router.delete('/:id', sensorController.deactivateSensor);
+router.post('/:id/deactivate', sensorController.deactivateSensor);
+router.delete('/:id', sensorController.deleteSensor);
 
 module.exports = router;

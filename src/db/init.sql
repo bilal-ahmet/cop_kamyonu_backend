@@ -297,3 +297,17 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN stop_locations.kind IS 'stop=ara durak, start=güzergah başlangıcı, end=güzergah bitişi (dönüş buradan başlar)';
+
+-- v4: Lokasyon kalıcı silinebilsin diye waypoints FK'sı SET NULL'a çevrilir.
+-- Ziyaret geçmişi korunur (location_name waypoint üzerinde zaten saklı), yalnızca bağ kopar.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'waypoints_stop_location_id_fkey' AND confdeltype <> 'n'
+    ) THEN
+        ALTER TABLE waypoints DROP CONSTRAINT waypoints_stop_location_id_fkey;
+        ALTER TABLE waypoints ADD CONSTRAINT waypoints_stop_location_id_fkey
+            FOREIGN KEY (stop_location_id) REFERENCES stop_locations(id) ON DELETE SET NULL;
+    END IF;
+END $$;

@@ -11,6 +11,7 @@ router.post('/', stopLocationController.createStopLocation);
 router.use('/:id', stopLocationOwnership);
 router.get('/:id', stopLocationController.getStopLocation);
 router.put('/:id', stopLocationController.updateStopLocation);
-router.delete('/:id', stopLocationController.deactivateStopLocation);
+router.post('/:id/deactivate', stopLocationController.deactivateStopLocation);
+router.delete('/:id', stopLocationController.deleteStopLocation);
 
 module.exports = router;

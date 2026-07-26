@@ -191,6 +191,9 @@ exports.getVehicleTelemetry = async (req, res) => {
     let limit = parseInt(req.query.limit) || 100;
     if (limit < 1) limit = 1;
     if (limit > 1000) limit = 1000;
+    // Sayfalama: kaç kayıt atlanacak (0 = ilk sayfa)
+    let offset = parseInt(req.query.offset) || 0;
+    if (offset < 0) offset = 0;
 
     const conditions = ['vehicle_id = $1'];
     const values = [vehicleId];
@@ -200,14 +203,15 @@ exports.getVehicleTelemetry = async (req, res) => {
     if (to) { conditions.push(`recorded_at <= $${idx++}`); values.push(to); }
     if (fix_valid !== undefined) { conditions.push(`fix_valid = $${idx++}`); values.push(fix_valid === 'true'); }
 
-    values.push(limit);
+    values.push(limit, offset);
     const result = await pool.query(
-      `SELECT * FROM telemetry WHERE ${conditions.join(' AND ')} ORDER BY recorded_at DESC LIMIT $${idx}`,
+      `SELECT * FROM telemetry WHERE ${conditions.join(' AND ')}
+       ORDER BY recorded_at DESC LIMIT $${idx} OFFSET $${idx + 1}`,
       values
     );
     res.json(result.rows);
   } catch (error) {
-    console.error('getVehicleTelemetry Error:', error);
+    console.error('getVehicleTelemetry Error:', error.code, error.message);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 };

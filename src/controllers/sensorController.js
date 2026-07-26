@@ -79,15 +79,49 @@ const updateSensor = async (req, res) => {
     }
 };
 
+/** Sensörü devre dışı bırakır (POST /sensors/:id/deactivate) — kayıt ve telemetrisi durur. */
 const deactivateSensor = async (req, res) => {
     try {
-        await pool.query('UPDATE sensors SET is_active = FALSE WHERE id = $1', [req.params.id]);
+        const result = await pool.query(
+            'UPDATE sensors SET is_active = FALSE WHERE id = $1 RETURNING *',
+            [req.params.id]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Sensör bulunamadı' });
         await sensorCache.loadActiveSensors();
-        res.json({ message: 'Sensör devre dışı bırakıldı' });
+        res.json(result.rows[0]);
     } catch (err) {
-        console.error('deactivateSensor hatası:', err);
+        console.error('deactivateSensor hatası:', err.code, err.message);
         res.status(500).json({ error: 'Sunucu hatası' });
     }
 };
 
-module.exports = { createSensor, getSensor, updateSensor, deactivateSensor };
+/**
+ * Sensörü kalıcı olarak siler (DELETE /sensors/:id).
+ * telemetry.sensor_id FK'sı ON DELETE RESTRICT olduğu için, kaydı olan sensör
+ * silinemez — telemetri geçmişini sessizce yok etmemek adına 409 döner.
+ */
+const deleteSensor = async (req, res) => {
+    try {
+        const used = await pool.query(
+            'SELECT COUNT(*)::int AS n FROM telemetry WHERE sensor_id = $1',
+            [req.params.id]
+        );
+        if (used.rows[0].n > 0) {
+            return res.status(409).json({
+                error: `Bu sensöre ait ${used.rows[0].n} telemetri kaydı var; silinemez. ` +
+                       `Veriyi korumak için "Devre dışı" seçeneğini kullanın.`,
+            });
+        }
+
+        const result = await pool.query('DELETE FROM sensors WHERE id = $1 RETURNING id', [req.params.id]);
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Sensör bulunamadı' });
+
+        await sensorCache.loadActiveSensors();
+        res.json({ message: 'Sensör silindi' });
+    } catch (err) {
+        console.error('deleteSensor hatası:', err.code, err.message);
+        res.status(500).json({ error: 'Sunucu hatası' });
+    }
+};
+
+module.exports = { createSensor, getSensor, updateSensor, deactivateSensor, deleteSensor };

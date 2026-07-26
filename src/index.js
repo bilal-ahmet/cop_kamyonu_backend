@@ -16,6 +16,7 @@ const { scheduleDailySummary } = require('./cron/dailySummary');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const START_TIME = new Date().toISOString();
 
 app.use(cors());
 app.use(express.json({
@@ -38,6 +39,28 @@ app.use('/api/stop-locations', stopLocationRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Sunucu çalışıyor! 🚀' });
+});
+
+/**
+ * Deploy durumu kontrolü (kimlik doğrulama gerektirmez).
+ * `features` listesi, çalışan sürümün hangi endpoint'leri desteklediğini söyler;
+ * "route var mı yok mu" sorusunu 401 duvarına takılmadan yanıtlar.
+ */
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    version: require('../package.json').version,
+    startedAt: START_TIME,
+    features: [
+      'assignments.end',        // POST /api/assignments/:id/end
+      'assignments.hardDelete', // DELETE /api/assignments/:id (kalıcı siler)
+      'stopLocations.kind',     // stop_locations.kind (stop|start|end)
+      'stopLocations.hardDelete',
+      'sensors.hardDelete',
+      'telemetry.offset',       // GET /api/vehicles/:id/telemetry?offset=
+      'waypoints.stopKind',
+    ],
+  });
 });
 
 const startServer = async () => {
