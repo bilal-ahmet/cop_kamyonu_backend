@@ -55,7 +55,7 @@ const createDriver = async (req, res) => {
 const updateDriver = async (req, res) => {
     try {
         const { id } = req.params;
-        const { full_name, license_no, phone, birth_date } = req.body;
+        const { full_name, license_no, phone, birth_date, is_active } = req.body;
 
         const exists = await pool.query(
             'SELECT id FROM drivers WHERE id = $1 AND user_id = $2',
@@ -78,6 +78,8 @@ const updateDriver = async (req, res) => {
         }
         if (phone !== undefined) { fields.push(`phone = $${idx++}`); values.push(phone); }
         if (birth_date !== undefined) { fields.push(`birth_date = $${idx++}`); values.push(birth_date); }
+        // Pasif şoförü yeniden aktif etmek için (Şoförler sekmesindeki "Tekrar aktif et").
+        if (is_active !== undefined) { fields.push(`is_active = $${idx++}`); values.push(Boolean(is_active)); }
 
         if (fields.length === 0) return res.status(400).json({ error: 'Güncellenecek alan belirtilmedi' });
 
@@ -110,12 +112,57 @@ const deactivateDriver = async (req, res) => {
         if (activeAssignment.rowCount > 0)
             return res.status(409).json({ error: 'Şoförün aktif araç ataması var, önce atamayı sonlandırın' });
 
-        await pool.query('UPDATE drivers SET is_active = FALSE WHERE id = $1', [id]);
-        res.json({ message: 'Sürücü devre dışı bırakıldı' });
+        const result = await pool.query(
+            'UPDATE drivers SET is_active = FALSE WHERE id = $1 RETURNING *', [id]);
+        res.json(result.rows[0]);
     } catch (err) {
-        console.error('deactivateDriver hatası:', err);
+        console.error('deactivateDriver hatası:', err.code, err.message);
         res.status(500).json({ error: 'Sunucu hatası' });
     }
 };
 
-module.exports = { getDrivers, getDriver, createDriver, updateDriver, deactivateDriver };
+/**
+ * Şoförü kalıcı olarak siler (DELETE /drivers/:id).
+ * Geçmişi olan şoför silinemez — atama/durak/rapor kayıtları şoföre bağlı ve
+ * bunları sessizce yok etmek yerine "Devre dışı" önerilir.
+ */
+const deleteDriver = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const exists = await pool.query(
+            'SELECT full_name FROM drivers WHERE id = $1 AND user_id = $2',
+            [id, req.user.id]
+        );
+        if (exists.rowCount === 0) return res.status(404).json({ error: 'Sürücü bulunamadı' });
+
+        // Şoföre bağlı kayıtlar (FK'lar RESTRICT/NO ACTION olduğu için silme engellenir)
+        const refs = await pool.query(
+            `SELECT
+               (SELECT COUNT(*)::int FROM vehicle_assignments WHERE driver_id = $1) AS assignments,
+               (SELECT COUNT(*)::int FROM waypoints           WHERE driver_id = $1) AS waypoints,
+               (SELECT COUNT(*)::int FROM daily_summaries     WHERE driver_id = $1) AS summaries`,
+            [id]
+        );
+        const { assignments, waypoints, summaries } = refs.rows[0];
+        const total = assignments + waypoints + summaries;
+        if (total > 0) {
+            const parts = [];
+            if (assignments) parts.push(`${assignments} araç tanımı`);
+            if (waypoints) parts.push(`${waypoints} durak kaydı`);
+            if (summaries) parts.push(`${summaries} günlük rapor`);
+            return res.status(409).json({
+                error: `Bu şoföre bağlı ${parts.join(', ')} var; silinemez. ` +
+                       `Geçmişi korumak için "Devre dışı" seçeneğini kullanın.`,
+            });
+        }
+
+        await pool.query('DELETE FROM drivers WHERE id = $1', [id]);
+        res.json({ message: 'Şoför silindi' });
+    } catch (err) {
+        console.error('deleteDriver hatası:', err.code, err.message);
+        res.status(500).json({ error: 'Sunucu hatası' });
+    }
+};
+
+module.exports = { getDrivers, getDriver, createDriver, updateDriver, deactivateDriver, deleteDriver };

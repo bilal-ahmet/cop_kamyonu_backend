@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+const pool = require('./db');
 const cache = require('./cache/sensorCache');
 const authRoutes = require('./routes/auth');
 const telemetryRoutes = require('./routes/telemetry');
@@ -46,21 +47,47 @@ app.get('/', (req, res) => {
  * `features` listesi, çalışan sürümün hangi endpoint'leri desteklediğini söyler;
  * "route var mı yok mu" sorusunu 401 duvarına takılmadan yanıtlar.
  */
-app.get('/api/health', (req, res) => {
-  res.json({
+app.get('/api/health', async (req, res) => {
+  const body = {
     ok: true,
     version: require('../package.json').version,
     startedAt: START_TIME,
     features: [
       'assignments.end',        // POST /api/assignments/:id/end
       'assignments.hardDelete', // DELETE /api/assignments/:id (kalıcı siler)
+      'assignments.reopen',     // PUT /api/assignments/:id { released_date: null }
       'stopLocations.kind',     // stop_locations.kind (stop|start|end)
       'stopLocations.hardDelete',
       'sensors.hardDelete',
+      'drivers.hardDelete',
+      'drivers.reactivate',     // PUT /api/drivers/:id { is_active: true }
       'telemetry.offset',       // GET /api/vehicles/:id/telemetry?offset=
       'waypoints.stopKind',
     ],
-  });
+  };
+
+  // Şema kontrolü: kodun beklediği migrasyonlar veritabanına uygulanmış mı?
+  // Uygulanmadıysa "kind hep Durak görünüyor" gibi sessiz hatalar oluşur.
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name='stop_locations' AND column_name='kind')              AS has_stop_location_kind,
+        EXISTS (SELECT 1 FROM pg_constraint
+                WHERE conname='waypoints_stop_location_id_fkey' AND confdeltype='n')   AS waypoint_fk_set_null
+    `);
+    const migrations = rows[0];
+    body.migrations = migrations;
+    body.migrationsApplied = Object.values(migrations).every(Boolean);
+    if (!body.migrationsApplied) {
+      body.hint = 'Eksik migrasyon var. Backend klasöründe "npm run migrate" çalıştırın.';
+    }
+  } catch (err) {
+    body.migrations = { error: err.code || err.message };
+    body.migrationsApplied = false;
+  }
+
+  res.json(body);
 });
 
 const startServer = async () => {

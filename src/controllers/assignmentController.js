@@ -138,7 +138,19 @@ const updateAssignment = async (req, res) => {
 
         if (released_date !== undefined) {
             if (released_date === null || released_date === '') {
-                // Atamayı yeniden aç.
+                // Atamayı yeniden aç — ama araçta zaten aktif bir tanım varsa çakışır.
+                if (row.released_date !== null) {
+                    const conflict = await pool.query(
+                        `SELECT id FROM vehicle_assignments
+                         WHERE vehicle_id = $1 AND released_date IS NULL AND id <> $2`,
+                        [row.vehicle_id, id]
+                    );
+                    if (conflict.rowCount > 0) {
+                        return res.status(409).json({
+                            error: 'Bu araç için zaten aktif bir tanım var; önce onu sonlandırın.',
+                        });
+                    }
+                }
                 fields.push(`released_date = NULL`);
             } else {
                 const released = toDateOnly(released_date);
