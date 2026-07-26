@@ -156,13 +156,30 @@ exports.getVehicleSummary = async (req, res) => {
 exports.getVehicleWaypoints = async (req, res) => {
   try {
     const vehicleId = parseInt(req.params.id);
+    const { from, to } = req.query;
+    let limit = parseInt(req.query.limit) || 50;
+    if (limit < 1) limit = 1;
+    if (limit > 500) limit = 500;
+
+    const conditions = ['w.vehicle_id = $1'];
+    const values = [vehicleId];
+    let idx = 2;
+
+    if (from) { conditions.push(`w.arrived_at >= $${idx++}`); values.push(from); }
+    if (to) { conditions.push(`w.arrived_at <= $${idx++}`); values.push(to); }
+
+    values.push(limit);
     const result = await pool.query(
-      'SELECT * FROM waypoints WHERE vehicle_id = $1 ORDER BY arrived_at DESC LIMIT 50',
-      [vehicleId]
+      `SELECT w.*, sl.kind AS stop_kind
+       FROM waypoints w
+       LEFT JOIN stop_locations sl ON sl.id = w.stop_location_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY w.arrived_at DESC LIMIT $${idx}`,
+      values
     );
     res.json(result.rows);
   } catch (error) {
-    console.error('getVehicleWaypoints Error:', error);
+    console.error('getVehicleWaypoints Error:', error.code, error.message);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 };

@@ -224,14 +224,19 @@ CREATE TABLE IF NOT EXISTS stop_locations (
     lat         NUMERIC(10,7)   NOT NULL,
     lon         NUMERIC(10,7)   NOT NULL,
     radius_m    INT             NOT NULL DEFAULT 5,
+    kind        VARCHAR(10)     NOT NULL DEFAULT 'stop',
     is_active   BOOLEAN         NOT NULL DEFAULT TRUE,
-    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT chk_sl_kind CHECK (kind IN ('stop', 'start', 'end'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_stop_locations_vehicle ON stop_locations(vehicle_id);
 
 COMMENT ON TABLE  stop_locations          IS 'Araç için önceden tanımlı çöp toplama noktaları — geofencing referansı';
 COMMENT ON COLUMN stop_locations.radius_m IS 'Kamyon bu yarıçap (metre) içine girince varış tetiklenir';
+-- NOT: stop_locations.kind yorumu 11. bölümde, kolonu ekleyen ALTER'dan SONRA verilir.
+-- (Mevcut bir veritabanında CREATE TABLE IF NOT EXISTS atlandığı için kolon burada henüz yok.)
 
 -- waypoints tablosuna geofencing bağlantısı
 ALTER TABLE waypoints ADD COLUMN IF NOT EXISTS
@@ -274,3 +279,21 @@ ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_humidity_pct   NUMERIC(
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_pressure_hpa   NUMERIC(7,2);
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS motion_count       INT NOT NULL DEFAULT 0;
 ALTER TABLE daily_summaries ADD COLUMN IF NOT EXISTS avg_battery_mv     INT;
+
+-- v3: Durak lokasyonu türü (durak / güzergah başlangıcı / güzergah bitişi)
+ALTER TABLE stop_locations ADD COLUMN IF NOT EXISTS
+    kind VARCHAR(10) NOT NULL DEFAULT 'stop';
+
+-- ADD CONSTRAINT IF NOT EXISTS Postgres'te yok — pg_constraint üzerinden kontrol edilir.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chk_sl_kind' AND conrelid = 'stop_locations'::regclass
+    ) THEN
+        ALTER TABLE stop_locations
+            ADD CONSTRAINT chk_sl_kind CHECK (kind IN ('stop', 'start', 'end'));
+    END IF;
+END $$;
+
+COMMENT ON COLUMN stop_locations.kind IS 'stop=ara durak, start=güzergah başlangıcı, end=güzergah bitişi (dönüş buradan başlar)';

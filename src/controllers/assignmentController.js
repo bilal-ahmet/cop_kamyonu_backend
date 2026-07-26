@@ -93,68 +93,129 @@ const createAssignment = async (req, res) => {
     }
 };
 
+/** ":id" parametresini güvenle sayıya çevirir; geçersizse null döner. */
+function parseId(raw) {
+    const id = parseInt(raw, 10);
+    return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** "YYYY-MM-DD" biçimini doğrular (timezone kayması olmadan karşılaştırılabilir). */
+function toDateOnly(value) {
+    if (value instanceof Date) {
+        // pg DATE kolonlarını yerel gece yarısı Date olarak döndürür.
+        const y = value.getFullYear();
+        const m = String(value.getMonth() + 1).padStart(2, '0');
+        const d = String(value.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    const s = String(value).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) ? s : null;
+}
+
+/** Sahiplik doğrulamalı atama okuma. Bulunamazsa null. */
+async function findOwnedAssignment(id, userId) {
+    const result = await pool.query(
+        `SELECT va.* FROM vehicle_assignments va
+         JOIN vehicles v ON v.id = va.vehicle_id
+         WHERE va.id = $1 AND v.user_id = $2`,
+        [id, userId]
+    );
+    return result.rowCount === 0 ? null : result.rows[0];
+}
+
 const updateAssignment = async (req, res) => {
     try {
-        const existing = await pool.query(
-            `SELECT va.* FROM vehicle_assignments va
-             JOIN vehicles v ON v.id = va.vehicle_id
-             WHERE va.id = $1 AND v.user_id = $2`,
-            [req.params.id, req.user.id]
-        );
-        if (existing.rowCount === 0)
-            return res.status(404).json({ error: 'Atama bulunamadı' });
+        const id = parseId(req.params.id);
+        if (id === null) return res.status(400).json({ error: 'Geçersiz atama id' });
 
-        const row = existing.rows[0];
+        const row = await findOwnedAssignment(id, req.user.id);
+        if (!row) return res.status(404).json({ error: 'Atama bulunamadı' });
+
         const { released_date, notes } = req.body;
         const fields = [];
         const values = [];
         let idx = 1;
 
         if (released_date !== undefined) {
-            if (new Date(released_date) < new Date(row.assigned_date))
-                return res.status(400).json({ error: 'released_date, assigned_date tarihinden önce olamaz' });
-            fields.push(`released_date = $${idx++}`); values.push(released_date);
+            if (released_date === null || released_date === '') {
+                // Atamayı yeniden aç.
+                fields.push(`released_date = NULL`);
+            } else {
+                const released = toDateOnly(released_date);
+                if (released === null)
+                    return res.status(400).json({ error: 'released_date geçerli bir tarih değil (YYYY-MM-DD)' });
+                // Metin karşılaştırması: ISO tarihleri sözlük sırasıyla kronolojiktir.
+                if (released < toDateOnly(row.assigned_date))
+                    return res.status(400).json({ error: 'released_date, assigned_date tarihinden önce olamaz' });
+                fields.push(`released_date = $${idx++}`); values.push(released);
+            }
         }
         if (notes !== undefined) { fields.push(`notes = $${idx++}`); values.push(notes); }
 
         if (fields.length === 0) return res.status(400).json({ error: 'Güncellenecek alan belirtilmedi' });
 
-        values.push(req.params.id);
+        values.push(id);
         const result = await pool.query(
             `UPDATE vehicle_assignments SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
             values
         );
         res.json(result.rows[0]);
     } catch (err) {
-        console.error('updateAssignment hatası:', err);
+        console.error('updateAssignment hatası:', err.code, err.message);
         res.status(500).json({ error: 'Sunucu hatası' });
     }
 };
 
+/**
+ * Atamayı sonlandırır (POST /assignments/:id/end).
+ * GREATEST(CURRENT_DATE, assigned_date) sayesinde gelecek tarihli atamalarda da
+ * chk_dates kısıtı ihlal edilmez (eski DELETE davranışındaki 500'ün kaynağıydı).
+ */
+const endAssignment = async (req, res) => {
+    try {
+        const id = parseId(req.params.id);
+        if (id === null) return res.status(400).json({ error: 'Geçersiz atama id' });
+
+        const row = await findOwnedAssignment(id, req.user.id);
+        if (!row) return res.status(404).json({ error: 'Atama bulunamadı' });
+        if (row.released_date !== null)
+            return res.status(409).json({ error: 'Bu atama zaten sonlandırılmış' });
+
+        const result = await pool.query(
+            `UPDATE vehicle_assignments
+             SET released_date = GREATEST(CURRENT_DATE, assigned_date)
+             WHERE id = $1 RETURNING *`,
+            [id]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('endAssignment hatası:', err.code, err.message);
+        res.status(500).json({ error: 'Sunucu hatası' });
+    }
+};
+
+/** Atamayı kalıcı olarak siler (DELETE /assignments/:id). */
 const deleteAssignment = async (req, res) => {
     try {
-        const existing = await pool.query(
-            `SELECT va.* FROM vehicle_assignments va
-             JOIN vehicles v ON v.id = va.vehicle_id
-             WHERE va.id = $1 AND v.user_id = $2`,
-            [req.params.id, req.user.id]
-        );
-        if (existing.rowCount === 0)
-            return res.status(404).json({ error: 'Atama bulunamadı' });
+        const id = parseId(req.params.id);
+        if (id === null) return res.status(400).json({ error: 'Geçersiz atama id' });
 
-        const row = existing.rows[0];
-        if (row.released_date !== null)
-            return res.status(409).json({ error: 'Geçmiş atamalar silinemez' });
+        const row = await findOwnedAssignment(id, req.user.id);
+        if (!row) return res.status(404).json({ error: 'Atama bulunamadı' });
 
-        await pool.query(
-            'UPDATE vehicle_assignments SET released_date = CURRENT_DATE WHERE id = $1',
-            [req.params.id]
-        );
-        res.json({ message: 'Atama sonlandırıldı' });
+        await pool.query('DELETE FROM vehicle_assignments WHERE id = $1', [id]);
+        res.json({ message: 'Atama silindi' });
     } catch (err) {
-        console.error('deleteAssignment hatası:', err);
+        console.error('deleteAssignment hatası:', err.code, err.message);
         res.status(500).json({ error: 'Sunucu hatası' });
     }
 };
 
-module.exports = { getAssignments, getAssignment, createAssignment, updateAssignment, deleteAssignment };
+module.exports = {
+    getAssignments,
+    getAssignment,
+    createAssignment,
+    updateAssignment,
+    endAssignment,
+    deleteAssignment,
+};
