@@ -125,7 +125,8 @@ exports.getVehicleLocation = async (req, res) => {
   try {
     const vehicleId = parseInt(req.params.id);
     const result = await pool.query(
-      `SELECT lat, lon, cog_deg, speed_kmh, speed_knots, load_kg, recorded_at, fix_valid
+      `SELECT lat, lon, altitude_m, cog_deg, speed_kmh, speed_knots, load_kg,
+              fix_valid, fix_type, satellites, recorded_at
        FROM telemetry WHERE vehicle_id = $1 ORDER BY recorded_at DESC LIMIT 1`,
       [vehicleId]
     );

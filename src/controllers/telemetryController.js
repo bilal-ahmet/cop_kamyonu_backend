@@ -68,13 +68,40 @@ async function checkGeofence(vehicleId, lat, lon, recordedAt) {
     }
 }
 
+/** Sayısal olmayan / aralık dışı opsiyonel alanları NULL'a indirger (kaydı reddetmez). */
+function sanitizeNumber(value, { min = -Infinity, max = Infinity } = {}) {
+    if (value == null) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < min || n > max) return null;
+    return n;
+}
+
 exports.receiveTelemetry = async (req, res) => {
     try {
-        // Yeni sensör JSON formatı: { "Device Id", timestamp, location: { Lat, Lon }, Sensors: { Weight, ... } }
+        // ESP JSON formatı:
+        // {
+        //   "Device Id", timestamp,
+        //   location: { Lat, Lon, Altitude, Speed, Course, "Fix Type", Satellites },
+        //   Sensors:  { Weight, ... }
+        // }
         const deviceId = req.body['Device Id'];
         const { timestamp } = req.body;
-        const lat = req.body.location?.Lat;
-        const lon = req.body.location?.Lon;
+        const location = req.body.location ?? {};
+        const lat = location.Lat;
+        const lon = location.Lon;
+
+        // Opsiyonel GNSS alanları — bozuk değer kaydı düşürmesin diye NULL'a indirgenir
+        const altitude_m = sanitizeNumber(location.Altitude, { min: -500, max: 10000 });
+        const speed_kmh  = sanitizeNumber(location.Speed,    { min: 0,    max: 300 });
+        const cog_deg    = sanitizeNumber(location.Course,   { min: 0,    max: 360 });
+        const fix_type   = sanitizeNumber(location['Fix Type'], { min: 0, max: 5 });
+        const satellites = sanitizeNumber(location.Satellites,  { min: 0, max: 64 });
+
+        // Fix Type: 0/1 = fix yok, 2 = 2D, 3 = 3D. Eski firmware Fix Type göndermez → geçerli sayılır.
+        const fix_valid = fix_type != null ? fix_type >= 2 : true;
+        // Şemadaki speed_knots kolonu km/s değerinden türetilir (1 knot = 1.852 km/s)
+        const speed_knots = speed_kmh != null ? Math.round((speed_kmh / 1.852) * 100) / 100 : null;
+
         const sensors    = req.body.Sensors ?? {};
         const load_kg       = sensors.Weight        ?? null;
         const temperature_c = sensors.Temperature   ?? null;
@@ -108,15 +135,21 @@ exports.receiveTelemetry = async (req, res) => {
         }
 
         // 3. Unix timestamp (saniye) → Date
-        const recordDate = new Date(timestamp * 1000);
+        const recordDate = new Date(Number(timestamp) * 1000);
+        if (Number.isNaN(recordDate.getTime())) {
+            return res.status(400).json({ error: 'timestamp geçerli bir Unix zamanı değil' });
+        }
 
         // 4. Veritabanına yazma
         await pool.query(
             `INSERT INTO telemetry
-             (sensor_id, vehicle_id, lat, lon, fix_valid, load_kg,
+             (sensor_id, vehicle_id, lat, lon, altitude_m, cog_deg,
+              fix_valid, fix_type, satellites, speed_kmh, speed_knots, load_kg,
               temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recorded_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-            [sensorId, vehicleId, lat, lon, true, load_kg,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                     $13, $14, $15, $16, $17, $18)`,
+            [sensorId, vehicleId, lat, lon, altitude_m, cog_deg,
+             fix_valid, fix_type, satellites, speed_kmh, speed_knots, load_kg,
              temperature_c, humidity_pct, pressure_hpa, motion, battery_mv, recordDate]
         );
 
@@ -126,8 +159,10 @@ exports.receiveTelemetry = async (req, res) => {
             console.error('[Telemetry] Günlük özet güncellenirken hata:', err)
         );
 
-        // Geofencing — telemetri yanıtını bloklamaz, arka planda çalışır
-        checkGeofence(vehicleId, lat, lon, recordDate);
+        // Geofencing — fix geçersizken koordinatlara güvenilmez, sahte varış üretmesin
+        if (fix_valid) {
+            checkGeofence(vehicleId, lat, lon, recordDate);
+        }
 
         res.status(200).json({ message: 'OK' });
     } catch (error) {

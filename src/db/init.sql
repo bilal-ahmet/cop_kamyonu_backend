@@ -120,11 +120,14 @@ CREATE TABLE IF NOT EXISTS telemetry (
     sensor_id       INT             NOT NULL REFERENCES sensors(id)  ON DELETE RESTRICT,
     vehicle_id      INT             NOT NULL REFERENCES vehicles(id) ON DELETE RESTRICT,
  
-    -- Konum 
+    -- Konum
     lat             NUMERIC(10,7)   NOT NULL,
     lon             NUMERIC(10,7)   NOT NULL,
+    altitude_m      NUMERIC(7,2),
     cog_deg         NUMERIC(6,2),
     fix_valid       BOOLEAN         NOT NULL DEFAULT FALSE,
+    fix_type        SMALLINT,
+    satellites      SMALLINT,
  
     -- Hız (opsiyonel — sensör göndermeyebilir)
     speed_kmh       NUMERIC(7,2),
@@ -311,3 +314,12 @@ BEGIN
             FOREIGN KEY (stop_location_id) REFERENCES stop_locations(id) ON DELETE SET NULL;
     END IF;
 END $$;
+
+-- v5: Yeni ESP telemetri formatı — GNSS kalite ve yükseklik alanları
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS altitude_m NUMERIC(7,2);
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS fix_type   SMALLINT;
+ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS satellites SMALLINT;
+
+COMMENT ON COLUMN telemetry.altitude_m IS 'GNSS yüksekliği (deniz seviyesine göre, metre)';
+COMMENT ON COLUMN telemetry.fix_type   IS 'GNSS fix türü: 0/1=fix yok, 2=2D fix, 3=3D fix';
+COMMENT ON COLUMN telemetry.satellites IS 'Konum hesabında kullanılan uydu sayısı';
