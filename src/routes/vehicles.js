@@ -18,6 +18,7 @@ router.delete('/:id', vehicleController.deactivateVehicle);
 router.get('/:id/location', vehicleController.getVehicleLocation);
 router.get('/:id/summary', vehicleController.getVehicleSummary);
 router.get('/:id/telemetry', vehicleController.getVehicleTelemetry);
+router.get('/:id/telemetry/gaps', vehicleController.getVehicleTelemetryGaps);
 router.get('/:id/sensors', vehicleController.getVehicleSensors);
 router.get('/:id/waypoints', vehicleController.getVehicleWaypoints);
 router.get('/:id/stop-locations', stopLocationController.getStopLocations);

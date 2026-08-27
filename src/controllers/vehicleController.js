@@ -217,6 +217,69 @@ exports.getVehicleTelemetry = async (req, res) => {
   }
 };
 
+/**
+ * Veri kesintileri: ardışık iki telemetri kaydı arasındaki süre `min_minutes` değerini
+ * aşan yerler. Her satır kesintinin başlangıcını (önceki kaydın zamanı), verinin tekrar
+ * geldiği zamanı ve toplam süreyi döner.
+ */
+exports.getVehicleTelemetryGaps = async (req, res) => {
+  try {
+    const vehicleId = parseInt(req.params.id);
+    const { from, to } = req.query;
+
+    // Eşik zorunlu: dakika cinsinden, 1 dk - 7 gün arası.
+    const minMinutes = parseInt(req.query.min_minutes);
+    if (!Number.isFinite(minMinutes) || minMinutes < 1 || minMinutes > 10080) {
+      return res.status(400).json({ error: 'min_minutes 1-10080 arası olmalı' });
+    }
+
+    let limit = parseInt(req.query.limit) || 100;
+    if (limit < 1) limit = 1;
+    if (limit > 500) limit = 500;
+    let offset = parseInt(req.query.offset) || 0;
+    if (offset < 0) offset = 0;
+
+    // Fix filtresi bilinçli olarak uygulanmıyor: kesinti = hiç veri gelmemesi.
+    // Fix'i geçersiz olan bir kayıt da "veri geldi" sayılır.
+    const conditions = ['vehicle_id = $1'];
+    const values = [vehicleId];
+    let idx = 2;
+
+    if (from) { conditions.push(`recorded_at >= $${idx++}`); values.push(from); }
+    if (to) { conditions.push(`recorded_at <= $${idx++}`); values.push(to); }
+
+    values.push(minMinutes, limit, offset);
+
+    // LAG ile bir önceki kaydın zamanı alınır; aynı saniyeye düşen kayıtlarda sıralamanın
+    // deterministik olması için id tiebreaker olarak eklendi.
+    const result = await pool.query(
+      `WITH ordered AS (
+         SELECT id, recorded_at, lat, lon,
+                LAG(recorded_at) OVER (ORDER BY recorded_at, id) AS prev_at,
+                LAG(id)          OVER (ORDER BY recorded_at, id) AS prev_id
+         FROM telemetry
+         WHERE ${conditions.join(' AND ')}
+       )
+       SELECT prev_id AS before_id,
+              id      AS after_id,
+              prev_at AS started_at,
+              recorded_at AS resumed_at,
+              EXTRACT(EPOCH FROM (recorded_at - prev_at))::bigint AS gap_seconds,
+              lat, lon
+       FROM ordered
+       WHERE prev_at IS NOT NULL
+         AND recorded_at - prev_at > make_interval(mins => $${idx})
+       ORDER BY recorded_at DESC
+       LIMIT $${idx + 1} OFFSET $${idx + 2}`,
+      values
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('getVehicleTelemetryGaps Error:', error.code, error.message);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+};
+
 exports.getVehicleSensors = async (req, res) => {
   try {
     const vehicleId = parseInt(req.params.id);

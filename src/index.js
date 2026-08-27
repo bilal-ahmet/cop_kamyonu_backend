@@ -62,6 +62,7 @@ app.get('/api/health', async (req, res) => {
       'drivers.hardDelete',
       'drivers.reactivate',     // PUT /api/drivers/:id { is_active: true }
       'telemetry.offset',       // GET /api/vehicles/:id/telemetry?offset=
+      'telemetry.gaps',         // GET /api/vehicles/:id/telemetry/gaps?min_minutes=
       'waypoints.stopKind',
     ],
   };
