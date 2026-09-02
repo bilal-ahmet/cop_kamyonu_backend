@@ -323,3 +323,83 @@ ALTER TABLE telemetry ADD COLUMN IF NOT EXISTS satellites SMALLINT;
 COMMENT ON COLUMN telemetry.altitude_m IS 'GNSS yüksekliği (deniz seviyesine göre, metre)';
 COMMENT ON COLUMN telemetry.fix_type   IS 'GNSS fix türü: 0/1=fix yok, 2=2D fix, 3=3D fix';
 COMMENT ON COLUMN telemetry.satellites IS 'Konum hesabında kullanılan uydu sayısı';
+
+
+-- ============================================================
+--  12. BİLDİRİMLER — "Araçtan veri gelmiyor" uyarıları (v6)
+-- ============================================================
+--
+-- Backend'in elindeki tek bilgi "veri gelmedi"dir; bu tek başına "internet kesildi"
+-- demek DEĞİLDİR (cihaz kapalı, firmware donmuş, sensör pasif, araç park halinde ya da
+-- sorun bizim sunucumuzda olabilir). Bu yüzden bildirim nötr kurulur ve sebep,
+-- mevcut veriden çıkarılan bir TAHMİN olarak ayrı kolonlarda tutulur.
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id           BIGSERIAL    PRIMARY KEY,
+    user_id      INT          NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
+    vehicle_id   INT                   REFERENCES vehicles(id) ON DELETE CASCADE,
+    type         VARCHAR(40)  NOT NULL,
+    severity     VARCHAR(10)  NOT NULL DEFAULT 'warning',
+    title        VARCHAR(200) NOT NULL,
+    message      TEXT,
+    probable_cause   VARCHAR(30),
+    cause_confidence VARCHAR(10),
+    metadata     JSONB,
+    is_read      BOOLEAN      NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    read_at      TIMESTAMPTZ,
+
+    CONSTRAINT chk_notif_severity CHECK (severity IN ('info', 'warning', 'critical'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notif_user_created ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notif_user_unread  ON notifications(user_id) WHERE is_read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_notif_vehicle      ON notifications(vehicle_id, created_at DESC);
+
+COMMENT ON TABLE  notifications                  IS 'Panelde gösterilen uyarılar — alıcı başına bir satır (okundu bilgisi kişiye özel)';
+COMMENT ON COLUMN notifications.type             IS 'vehicle_data_stale | vehicle_data_resumed | system_outage | system_recovered';
+COMMENT ON COLUMN notifications.probable_cause   IS 'TAHMİN: connectivity | power | sensor_config | system_outage | parked | unknown';
+COMMENT ON COLUMN notifications.cause_confidence IS 'low | medium | high | confirmed — "confirmed" yalnızca geriye dönük kanıtla verilir';
+COMMENT ON COLUMN notifications.metadata         IS 'JSON: { last_seen_at, silent_minutes, plate, evidence: [...] } — tahminin dayanağı';
+
+
+-- Araç başına bağlantı durumu — cron''un durum makinesi.
+-- Sunucu yeniden başlasa da mükerrer bildirim üretilmemesini ve tekrar sayacının
+-- korunmasını sağlar (durum bellekte değil, burada tutulur).
+CREATE TABLE IF NOT EXISTS vehicle_connection_state (
+    vehicle_id       INT PRIMARY KEY REFERENCES vehicles(id) ON DELETE CASCADE,
+    is_online        BOOLEAN     NOT NULL DEFAULT TRUE,
+    last_seen_at     TIMESTAMPTZ,
+    silent_since     TIMESTAMPTZ,
+    last_notified_at TIMESTAMPTZ,
+    last_cause       VARCHAR(30),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE  vehicle_connection_state                  IS 'Araç başına son bilinen veri akışı durumu';
+COMMENT ON COLUMN vehicle_connection_state.last_seen_at     IS 'Son telemetry.received_at — recorded_at DEĞİL (cihaz saati kayabilir)';
+COMMENT ON COLUMN vehicle_connection_state.last_notified_at IS 'Son "veri gelmiyor" bildiriminin zamanı — tekrar aralığı buradan hesaplanır';
+COMMENT ON COLUMN vehicle_connection_state.last_cause       IS 'Son üretilen sebep tahmini; değişirse tekrar aralığı beklenmeden yeni bildirim çıkar';
+
+
+-- "Cihaz bize ULAŞIYOR ama tanınmıyor" kanıtı: /api/telemetry''e gelip 401 yiyen istekler.
+-- Bu kayıt varsa sessizliğin sebebi internet değil, konfigürasyondur.
+-- Seri numarası başına TEK satır (upsert): yabancı/bozuk bir cihaz tabloyu şişiremez.
+CREATE TABLE IF NOT EXISTS sensor_auth_failures (
+    serial_number    VARCHAR(100) PRIMARY KEY,
+    reason           VARCHAR(40)  NOT NULL,
+    vehicle_id       INT REFERENCES vehicles(id) ON DELETE SET NULL,
+    attempt_count    BIGINT       NOT NULL DEFAULT 1,
+    first_attempt_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    last_attempt_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_saf_vehicle ON sensor_auth_failures(vehicle_id);
+
+-- Bağlantı takibi her dakika araç başına MAX(received_at) sorar. Mevcut
+-- idx_tel_vehicle_time indeksi recorded_at üzerinde olduğu için bu sorguya yardım etmez.
+CREATE INDEX IF NOT EXISTS idx_tel_vehicle_received ON telemetry(vehicle_id, received_at DESC);
+
+COMMENT ON TABLE  sensor_auth_failures            IS 'Tanınmayan/pasif sensörden gelen telemetri denemeleri — "internet var, ayar bozuk" kanıtı';
+COMMENT ON COLUMN sensor_auth_failures.reason     IS 'unknown_serial = hiç kayıtlı değil | inactive_sensor = kayıtlı ama pasif';
+COMMENT ON COLUMN sensor_auth_failures.vehicle_id IS 'Sensör kayıtlı ama pasifse hangi araca ait olduğu bilinir';

@@ -13,7 +13,9 @@ const sensorRoutes = require('./routes/sensors');
 const assignmentRoutes = require('./routes/assignments');
 const userRoutes = require('./routes/users');
 const stopLocationRoutes = require('./routes/stopLocations');
+const notificationRoutes = require('./routes/notifications');
 const { scheduleDailySummary } = require('./cron/dailySummary');
+const { scheduleConnectivityWatch } = require('./cron/connectivityWatch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +39,7 @@ app.use('/api/sensors', sensorRoutes);
 app.use('/api/assignments', assignmentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/stop-locations', stopLocationRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.get('/', (req, res) => {
   res.json({ message: 'Sunucu çalışıyor! 🚀' });
@@ -64,6 +67,7 @@ app.get('/api/health', async (req, res) => {
       'telemetry.offset',       // GET /api/vehicles/:id/telemetry?offset=
       'telemetry.gaps',         // GET /api/vehicles/:id/telemetry/gaps?min_minutes=
       'waypoints.stopKind',
+      'notifications.dataStaleAlerts', // GET /api/notifications, araç sessizliği uyarıları
     ],
   };
 
@@ -75,7 +79,11 @@ app.get('/api/health', async (req, res) => {
         EXISTS (SELECT 1 FROM information_schema.columns
                 WHERE table_name='stop_locations' AND column_name='kind')              AS has_stop_location_kind,
         EXISTS (SELECT 1 FROM pg_constraint
-                WHERE conname='waypoints_stop_location_id_fkey' AND confdeltype='n')   AS waypoint_fk_set_null
+                WHERE conname='waypoints_stop_location_id_fkey' AND confdeltype='n')   AS waypoint_fk_set_null,
+        EXISTS (SELECT 1 FROM information_schema.tables
+                WHERE table_name='notifications')                                      AS has_notifications,
+        EXISTS (SELECT 1 FROM information_schema.tables
+                WHERE table_name='vehicle_connection_state')                           AS has_connection_state
     `);
     const migrations = rows[0];
     body.migrations = migrations;
@@ -97,6 +105,7 @@ const startServer = async () => {
 
     // 2. Zamanlanmış görevleri (Cron) başlat
     scheduleDailySummary();
+    scheduleConnectivityWatch();
 
     // 3. Sunucuyu dinle
     app.listen(PORT, () => {

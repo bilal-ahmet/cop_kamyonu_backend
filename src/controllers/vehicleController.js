@@ -1,5 +1,13 @@
 const pool = require('../db');
 
+// Araç listesine veri akışı durumunu da ekler (panelde "veri gelmiyor" rozeti için).
+// Takip henüz bir tur atmadıysa satır olmaz; o durumda is_online NULL döner = "bilinmiyor".
+const CONNECTION_FIELDS = `
+           cs.is_online    AS connection_online,
+           cs.last_seen_at AS connection_last_seen_at,
+           cs.last_cause   AS connection_cause`;
+const CONNECTION_JOIN = 'LEFT JOIN vehicle_connection_state cs ON cs.vehicle_id = v.id';
+
 exports.getVehicles = async (req, res) => {
   try {
     let result;
@@ -7,25 +15,33 @@ exports.getVehicles = async (req, res) => {
       const targetUserId = req.query.user_id ? parseInt(req.query.user_id) : null;
       if (targetUserId) {
         result = await pool.query(
-          `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name
+          `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name,
+                  ${CONNECTION_FIELDS}
            FROM vehicles v
            JOIN users u ON u.id = v.user_id
+           ${CONNECTION_JOIN}
            WHERE v.is_active = TRUE AND v.user_id = $1
            ORDER BY v.plate`,
           [targetUserId]
         );
       } else {
         result = await pool.query(
-          `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name
+          `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name,
+                  ${CONNECTION_FIELDS}
            FROM vehicles v
            JOIN users u ON u.id = v.user_id
+           ${CONNECTION_JOIN}
            WHERE v.is_active = TRUE
            ORDER BY u.username, v.plate`
         );
       }
     } else {
       result = await pool.query(
-        'SELECT * FROM vehicles WHERE user_id = $1 AND is_active = TRUE ORDER BY plate',
+        `SELECT v.*, ${CONNECTION_FIELDS}
+         FROM vehicles v
+         ${CONNECTION_JOIN}
+         WHERE v.user_id = $1 AND v.is_active = TRUE
+         ORDER BY v.plate`,
         [req.user.id]
       );
     }

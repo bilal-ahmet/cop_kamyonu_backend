@@ -1,6 +1,7 @@
 const pool = require('../db');
 const sensorCache = require('../cache/sensorCache');
 const { calculateDailySummary } = require('../cron/dailySummary');
+const { recordAuthFailure } = require('../services/sensorAuthLog');
 
 /** Haversine formülü — iki GPS noktası arasındaki mesafeyi metre cinsinden hesaplar. */
 function haversineMeters(lat1, lon1, lat2, lon2) {
@@ -120,6 +121,9 @@ exports.receiveTelemetry = async (req, res) => {
         // 1. Sensör doğrulama (in-memory cache üzerinden)
         const sensorData = sensorCache.getVehicleIdBySensorSN(deviceId);
         if (!sensorData) {
+            // Denemeyi kaydet: cihaz sunucuya ULAŞIYOR demektir. Araç sonradan "sessiz"
+            // görünürse bu kayıt, sessizliğin internet değil tanım kaynaklı olduğunu gösterir.
+            await recordAuthFailure(deviceId);
             return res.status(401).json({ error: 'Yetkisiz Sensör: Aktif bir kayıt bulunamadı.' });
         }
 
