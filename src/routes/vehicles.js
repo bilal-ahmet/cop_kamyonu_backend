@@ -3,9 +3,10 @@ const router = express.Router();
 const vehicleController = require('../controllers/vehicleController');
 const stopLocationController = require('../controllers/stopLocationController');
 const authMiddleware = require('../middleware/authMiddleware');
+const actingUser = require('../middleware/actingUser');
 const verifyVehicleOwnership = require('../middleware/vehicleOwnership');
 
-router.use(authMiddleware);
+router.use(authMiddleware, actingUser);
 
 router.get('/', vehicleController.getVehicles);
 router.post('/', vehicleController.createVehicle);

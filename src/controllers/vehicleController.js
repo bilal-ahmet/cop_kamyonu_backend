@@ -11,8 +11,10 @@ const CONNECTION_JOIN = 'LEFT JOIN vehicle_connection_state cs ON cs.vehicle_id 
 exports.getVehicles = async (req, res) => {
   try {
     let result;
-    if (req.user.role === 'admin') {
-      const targetUserId = req.query.user_id ? parseInt(req.query.user_id) : null;
+    if (req.isAdmin) {
+      // Hedef kullanıcı seçilmişse (?user_id= / X-Acting-User-Id) yalnızca onun
+      // araçları, seçilmemişse tüm filo listelenir.
+      const targetUserId = req.scopeUserId;
       if (targetUserId) {
         result = await pool.query(
           `SELECT v.*, u.username AS owner_username, u.full_name AS owner_full_name,
@@ -54,13 +56,17 @@ exports.getVehicles = async (req, res) => {
 
 exports.createVehicle = async (req, res) => {
   try {
-    const userId = req.user.id;
+    // Admin bir müşterinin hesabına girip onun adına araç ekleyebilir; sahibi
+    // actingUser middleware'i belirler (hedef verilmediyse isteği yapan kişi).
+    const userId = req.actingUserId;
     const { plate, brand, model, year, vehicle_type, capacity_kg } = req.body;
     if (!plate) return res.status(400).json({ error: 'plate (plaka) zorunludur' });
 
-    if (year !== undefined && (isNaN(year) || year < 1900 || year > 2100))
+    // null = "alan boş bırakıldı"; aralık kontrolüne sokulmaz. (null < 1900
+    // JavaScript'te true'dur — bu yüzden yılsız araç eklenemiyordu.)
+    if (year != null && (isNaN(year) || year < 1900 || year > 2100))
       return res.status(400).json({ error: 'year 1900-2100 arasında olmalıdır' });
-    if (capacity_kg !== undefined && capacity_kg < 0)
+    if (capacity_kg != null && capacity_kg < 0)
       return res.status(400).json({ error: 'capacity_kg negatif olamaz' });
 
     const dup = await pool.query('SELECT id FROM vehicles WHERE plate = $1', [plate]);
@@ -94,13 +100,15 @@ exports.updateVehicle = async (req, res) => {
     if (brand !== undefined) { fields.push(`brand = $${idx++}`); values.push(brand); }
     if (model !== undefined) { fields.push(`model = $${idx++}`); values.push(model); }
     if (year !== undefined) {
-      if (isNaN(year) || year < 1900 || year > 2100)
+      // null gönderilirse yıl temizlenir; aralık kontrolü yalnızca değer varken.
+      if (year !== null && (isNaN(year) || year < 1900 || year > 2100))
         return res.status(400).json({ error: 'year 1900-2100 arasında olmalıdır' });
       fields.push(`year = $${idx++}`); values.push(year);
     }
     if (vehicle_type !== undefined) { fields.push(`vehicle_type = $${idx++}`); values.push(vehicle_type); }
     if (capacity_kg !== undefined) {
-      if (capacity_kg < 0) return res.status(400).json({ error: 'capacity_kg negatif olamaz' });
+      if (capacity_kg !== null && capacity_kg < 0)
+        return res.status(400).json({ error: 'capacity_kg negatif olamaz' });
       fields.push(`capacity_kg = $${idx++}`); values.push(capacity_kg);
     }
 

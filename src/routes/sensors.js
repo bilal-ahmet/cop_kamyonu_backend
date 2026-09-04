@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const sensorController = require('../controllers/sensorController');
 const authMiddleware = require('../middleware/authMiddleware');
+const actingUser = require('../middleware/actingUser');
 const sensorOwnership = require('../middleware/sensorOwnership');
 
-router.use(authMiddleware);
+router.use(authMiddleware, actingUser);
 
 router.post('/', sensorController.createSensor);
 

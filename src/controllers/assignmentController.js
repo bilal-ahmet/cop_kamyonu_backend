@@ -1,24 +1,31 @@
 const pool = require('../db');
+const {
+    findAccessibleVehicle,
+    findAccessibleAssignment,
+    denyVehicle,
+} = require('../utils/access');
 
 const getAssignments = async (req, res) => {
     try {
-        const userId = req.user.id;
         const { vehicle_id, driver_id, active_only } = req.query;
 
-        const conditions = ['v.user_id = $1'];
-        const values = [userId];
-        let idx = 2;
+        // Admin hedef kullanıcı seçmediyse scopeUserId null gelir ve tüm
+        // filonun atamaları listelenir.
+        const conditions = [];
+        const values = [];
+        let idx = 1;
 
+        if (req.scopeUserId !== null) {
+            conditions.push(`v.user_id = $${idx++}`); values.push(req.scopeUserId);
+        }
         if (vehicle_id) {
-            const owns = await pool.query(
-                'SELECT id FROM vehicles WHERE id = $1 AND user_id = $2',
-                [vehicle_id, userId]
-            );
-            if (owns.rowCount === 0) return res.status(403).json({ error: 'Bu araca erişim yetkiniz yok' });
+            const vehicle = await findAccessibleVehicle(req, vehicle_id);
+            if (!vehicle) return denyVehicle(req, res);
             conditions.push(`va.vehicle_id = $${idx++}`); values.push(vehicle_id);
         }
         if (driver_id) { conditions.push(`va.driver_id = $${idx++}`); values.push(driver_id); }
         if (active_only === 'true') conditions.push('va.released_date IS NULL');
+        if (conditions.length === 0) conditions.push('TRUE');
 
         const result = await pool.query(
             `SELECT va.*, d.full_name AS driver_name, v.plate AS vehicle_plate
@@ -38,13 +45,17 @@ const getAssignments = async (req, res) => {
 
 const getAssignment = async (req, res) => {
     try {
+        const conditions = ['va.id = $1'];
+        const values = [req.params.id];
+        if (!req.isAdmin) { conditions.push('v.user_id = $2'); values.push(req.user.id); }
+
         const result = await pool.query(
             `SELECT va.*, d.full_name AS driver_name, v.plate AS vehicle_plate
              FROM vehicle_assignments va
              JOIN vehicles v ON v.id = va.vehicle_id
              JOIN drivers d ON d.id = va.driver_id
-             WHERE va.id = $1 AND v.user_id = $2`,
-            [req.params.id, req.user.id]
+             WHERE ${conditions.join(' AND ')}`,
+            values
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Atama bulunamadı' });
         res.json(result.rows[0]);
@@ -60,19 +71,24 @@ const createAssignment = async (req, res) => {
         if (!vehicle_id || !driver_id)
             return res.status(400).json({ error: 'vehicle_id ve driver_id zorunludur' });
 
-        const vehicle = await pool.query(
-            'SELECT id FROM vehicles WHERE id = $1 AND user_id = $2 AND is_active = TRUE',
-            [vehicle_id, req.user.id]
-        );
-        if (vehicle.rowCount === 0)
-            return res.status(403).json({ error: 'Bu araca erişim yetkiniz yok veya araç pasif' });
+        // Admin her araca şoför atayabilir; müşteri yalnızca kendi araçlarına.
+        const vehicle = await findAccessibleVehicle(req, vehicle_id);
+        if (!vehicle) return denyVehicle(req, res);
+        if (!vehicle.is_active)
+            return res.status(409).json({ error: 'Araç pasif; önce aracı yeniden aktif edin' });
 
         const driver = await pool.query(
-            'SELECT id FROM drivers WHERE id = $1 AND is_active = TRUE',
+            'SELECT id, user_id FROM drivers WHERE id = $1 AND is_active = TRUE',
             [driver_id]
         );
         if (driver.rowCount === 0)
             return res.status(404).json({ error: 'Sürücü bulunamadı veya pasif' });
+
+        // Şoför, aracın sahibi olan müşteriye ait olmalı — id tahmin edilerek
+        // başka bir müşterinin şoförü bu araca tanımlanamasın. drivers.user_id
+        // kolonu sonradan eklendiği için sahipsiz eski kayıtlar muaf tutulur.
+        if (driver.rows[0].user_id != null && driver.rows[0].user_id !== vehicle.user_id)
+            return res.status(409).json({ error: 'Bu şoför, aracın sahibi olan müşteriye ait değil' });
 
         const conflict = await pool.query(
             'SELECT id FROM vehicle_assignments WHERE vehicle_id = $1 AND released_date IS NULL',
@@ -112,23 +128,12 @@ function toDateOnly(value) {
     return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) ? s : null;
 }
 
-/** Sahiplik doğrulamalı atama okuma. Bulunamazsa null. */
-async function findOwnedAssignment(id, userId) {
-    const result = await pool.query(
-        `SELECT va.* FROM vehicle_assignments va
-         JOIN vehicles v ON v.id = va.vehicle_id
-         WHERE va.id = $1 AND v.user_id = $2`,
-        [id, userId]
-    );
-    return result.rowCount === 0 ? null : result.rows[0];
-}
-
 const updateAssignment = async (req, res) => {
     try {
         const id = parseId(req.params.id);
         if (id === null) return res.status(400).json({ error: 'Geçersiz atama id' });
 
-        const row = await findOwnedAssignment(id, req.user.id);
+        const row = await findAccessibleAssignment(req, id);
         if (!row) return res.status(404).json({ error: 'Atama bulunamadı' });
 
         const { released_date, notes } = req.body;
@@ -188,7 +193,7 @@ const endAssignment = async (req, res) => {
         const id = parseId(req.params.id);
         if (id === null) return res.status(400).json({ error: 'Geçersiz atama id' });
 
-        const row = await findOwnedAssignment(id, req.user.id);
+        const row = await findAccessibleAssignment(req, id);
         if (!row) return res.status(404).json({ error: 'Atama bulunamadı' });
         if (row.released_date !== null)
             return res.status(409).json({ error: 'Bu atama zaten sonlandırılmış' });
@@ -212,7 +217,7 @@ const deleteAssignment = async (req, res) => {
         const id = parseId(req.params.id);
         if (id === null) return res.status(400).json({ error: 'Geçersiz atama id' });
 
-        const row = await findOwnedAssignment(id, req.user.id);
+        const row = await findAccessibleAssignment(req, id);
         if (!row) return res.status(404).json({ error: 'Atama bulunamadı' });
 
         await pool.query('DELETE FROM vehicle_assignments WHERE id = $1', [id]);

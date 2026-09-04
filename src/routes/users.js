@@ -10,5 +10,7 @@ router.get('/me', userController.getMe);
 router.put('/me', userController.updateMe);
 router.get('/', requireAdmin, userController.getUsers);
 router.post('/', requireAdmin, userController.createUser);
+// '/me' yukarıda tanımlı olduğu için '/:id' onu gölgelemez.
+router.get('/:id', requireAdmin, userController.getUser);
 
 module.exports = router;

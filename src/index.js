@@ -68,6 +68,9 @@ app.get('/api/health', async (req, res) => {
       'telemetry.gaps',         // GET /api/vehicles/:id/telemetry/gaps?min_minutes=
       'waypoints.stopKind',
       'notifications.dataStaleAlerts', // GET /api/notifications, araç sessizliği uyarıları
+      'users.byId',             // GET /api/users/:id (admin)
+      'admin.actingUser',       // Admin başka kullanıcı adına yazabilir:
+                                // X-Acting-User-Id başlığı / ?user_id= / body.user_id
     ],
   };
 

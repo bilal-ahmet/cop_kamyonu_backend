@@ -1,5 +1,6 @@
 const pool = require('../db');
 const sensorCache = require('../cache/sensorCache');
+const { findAccessibleVehicle, denyVehicle } = require('../utils/access');
 
 const createSensor = async (req, res) => {
     try {
@@ -7,12 +8,9 @@ const createSensor = async (req, res) => {
         if (!vehicle_id || !serial_number)
             return res.status(400).json({ error: 'vehicle_id ve serial_number zorunludur' });
 
-        const vehicle = await pool.query(
-            'SELECT id FROM vehicles WHERE id = $1 AND user_id = $2',
-            [vehicle_id, req.user.id]
-        );
-        if (vehicle.rowCount === 0)
-            return res.status(403).json({ error: 'Bu araca erişim yetkiniz yok' });
+        // Admin her araca sensör ekleyebilir; müşteri yalnızca kendi araçlarına.
+        const vehicle = await findAccessibleVehicle(req, vehicle_id);
+        if (!vehicle) return denyVehicle(req, res);
 
         const dup = await pool.query('SELECT id FROM sensors WHERE serial_number = $1', [serial_number]);
         if (dup.rowCount > 0)

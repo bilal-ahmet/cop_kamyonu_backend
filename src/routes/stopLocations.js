@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const stopLocationController = require('../controllers/stopLocationController');
 const authMiddleware = require('../middleware/authMiddleware');
+const actingUser = require('../middleware/actingUser');
 const stopLocationOwnership = require('../middleware/stopLocationOwnership');
 
-router.use(authMiddleware);
+router.use(authMiddleware, actingUser);
 
 router.post('/', stopLocationController.createStopLocation);
 

@@ -1,4 +1,5 @@
 const pool = require('../db');
+const { findAccessibleVehicle, denyVehicle } = require('../utils/access');
 
 const KINDS = ['stop', 'start', 'end'];
 
@@ -52,12 +53,9 @@ const createStopLocation = async (req, res) => {
         if (kind !== undefined && kind !== null && !KINDS.includes(kind))
             return res.status(400).json({ error: `kind şunlardan biri olmalı: ${KINDS.join(', ')}` });
 
-        const vehicle = await pool.query(
-            'SELECT id FROM vehicles WHERE id = $1 AND user_id = $2',
-            [vehicle_id, req.user.id]
-        );
-        if (vehicle.rowCount === 0)
-            return res.status(403).json({ error: 'Bu araca erişim yetkiniz yok' });
+        // Admin her araca lokasyon tanımlayabilir; müşteri yalnızca kendi araçlarına.
+        const vehicle = await findAccessibleVehicle(req, vehicle_id);
+        if (!vehicle) return denyVehicle(req, res);
 
         const result = await pool.query(
             `INSERT INTO stop_locations (vehicle_id, name, lat, lon, radius_m, kind)

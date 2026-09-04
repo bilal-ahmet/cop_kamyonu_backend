@@ -71,6 +71,25 @@ const getUsers = async (req, res) => {
     }
 };
 
+/** Tek kullanıcı (GET /users/:id). Admin'in müşteri çalışma alanı başlığı için. */
+const getUser = async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isInteger(id) || id <= 0)
+            return res.status(400).json({ error: 'Geçersiz kullanıcı id' });
+
+        const result = await pool.query(
+            'SELECT id, username, email, full_name, role, is_active, created_at, last_login FROM users WHERE id = $1',
+            [id]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('getUser hatası:', err);
+        res.status(500).json({ error: 'Sunucu hatası' });
+    }
+};
+
 const createUser = async (req, res) => {
     try {
         const { username, email, password, full_name } = req.body;
@@ -95,4 +114,4 @@ const createUser = async (req, res) => {
     }
 };
 
-module.exports = { getMe, updateMe, getUsers, createUser };
+module.exports = { getMe, updateMe, getUsers, getUser, createUser };
