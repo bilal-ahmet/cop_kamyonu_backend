@@ -242,6 +242,85 @@ exports.getVehicleTelemetry = async (req, res) => {
 };
 
 /**
+ * Harita rotası: seçilen aralığın TAMAMINI kapsayan, hafif (yalnızca konum kolonları)
+ * ve kronolojik sıralı nokta listesi.
+ *
+ * `/telemetry` ile farkı: orası tabloyu besler (DESC + sayfalama), bu ise haritayı besler.
+ * DESC + LIMIT ile kırpmak aralığın yalnızca en yeni N kaydını döndürdüğü için rotanın
+ * başı düşüyordu; burada kırpma yerine eşit aralıklı seyreltme yapılır. Aralıktaki kayıt
+ * sayısı `max_points` altındaysa hiç seyreltme olmaz (stride = 1), üstündeyse her
+ * `stride` kayıttan biri alınır — rota yine baştan sona kapsanır, yalnızca çözünürlük
+ * düşer. İlk ve son nokta her koşulda korunur.
+ */
+exports.getVehicleTrack = async (req, res) => {
+  try {
+    const vehicleId = parseInt(req.params.id);
+    const { from, to, fix_valid } = req.query;
+
+    // Aralık zorunlu: sınırsız tablo taraması açmıyoruz.
+    if (!from || !to) return res.status(400).json({ error: 'from ve to zorunlu' });
+
+    const fromMs = Date.parse(from);
+    const toMs = Date.parse(to);
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+      return res.status(400).json({ error: 'from ve to geçerli tarih olmalı' });
+    }
+    if (toMs < fromMs) return res.status(400).json({ error: 'to, from değerinden önce olamaz' });
+    if (toMs - fromMs > 31 * 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'Aralık en fazla 31 gün olabilir' });
+    }
+
+    let maxPoints = parseInt(req.query.max_points) || 4000;
+    if (maxPoints < 100) maxPoints = 100;
+    if (maxPoints > 20000) maxPoints = 20000;
+
+    const conditions = ['vehicle_id = $1', 'recorded_at >= $2', 'recorded_at <= $3'];
+    const values = [vehicleId, from, to];
+    let idx = 4;
+
+    if (fix_valid !== undefined) { conditions.push(`fix_valid = $${idx++}`); values.push(fix_valid === 'true'); }
+
+    values.push(maxPoints);
+
+    // stride = 1 kontrolü şart: Postgres'te `rn % 1` her zaman 0'dır, 1 değil. Bu dal
+    // olmadan seyreltme gerekmeyen (dar aralık) durumda sorgu hiç satır döndürmez.
+    const result = await pool.query(
+      `WITH src AS (
+         SELECT lat, lon, speed_kmh, cog_deg, recorded_at,
+                ROW_NUMBER() OVER (ORDER BY recorded_at, id) AS rn,
+                COUNT(*)     OVER ()                         AS total
+         FROM telemetry
+         WHERE ${conditions.join(' AND ')}
+       ),
+       s AS (
+         SELECT GREATEST(1, CEIL(MAX(total)::numeric / $${idx})::int) AS stride FROM src
+       )
+       SELECT src.lat, src.lon, src.speed_kmh, src.cog_deg, src.recorded_at,
+              src.total, s.stride
+       FROM src, s
+       WHERE s.stride = 1 OR src.rn % s.stride = 1 OR src.rn = src.total
+       ORDER BY src.recorded_at, src.rn`,
+      values
+    );
+
+    const first = result.rows[0];
+    const total = first ? Number(first.total) : 0;
+    const stride = first ? Number(first.stride) : 1;
+
+    res.json({
+      points: result.rows.map(({ total: _total, stride: _stride, ...point }) => point),
+      total,
+      returned: result.rows.length,
+      stride,
+      downsampled: stride > 1,
+    });
+  } catch (error) {
+    console.error('getVehicleTrack Error:', error.code, error.message);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+};
+
+/**
  * Veri kesintileri: ardışık iki telemetri kaydı arasındaki süre `min_minutes` değerini
  * aşan yerler. Her satır kesintinin başlangıcını (önceki kaydın zamanı), verinin tekrar
  * geldiği zamanı ve toplam süreyi döner.
